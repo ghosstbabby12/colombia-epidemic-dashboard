@@ -6,15 +6,12 @@ __pycache__/
 .Python
 venv/
 .venv/
-env/
 *.egg-info/
 dist/
 build/
 
 # Entorno
-.env
-.env.local
-.env.*.local
+
 
 # Jupyter
 .ipynb_checkpoints/
@@ -27,9 +24,7 @@ data/raw/*.json
 data/processed/*.csv
 data/processed/*.parquet
 
-# Modelos entrenados
-src/ml/models/*.pkl
-src/ml/models/*.joblib
+# Modelos entrenados=
 
 # macOS
 .DS_Store
