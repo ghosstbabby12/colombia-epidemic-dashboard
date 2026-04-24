@@ -1,0 +1,84 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Segoe UI', sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+/* Layout */
+.dashboard { display: flex; flex-direction: column; min-height: 100vh; }
+
+.header {
+  background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+  border-bottom: 1px solid #1e40af;
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header h1 { font-size: 1.4rem; font-weight: 700; color: #60a5fa; }
+.header span { font-size: 0.85rem; color: #94a3b8; }
+
+.main { padding: 1.5rem 2rem; flex: 1; }
+
+/* Selector de enfermedad */
+.selector-bar {
+  display: flex; gap: 0.5rem; margin-bottom: 1.5rem; align-items: center;
+}
+.btn-enf {
+  padding: 0.45rem 1.2rem; border-radius: 999px; border: 1px solid #334155;
+  background: #1e293b; color: #94a3b8; cursor: pointer; font-size: 0.85rem;
+  transition: all 0.2s;
+}
+.btn-enf.active { background: #1d4ed8; border-color: #3b82f6; color: #fff; }
+.btn-enf:hover:not(.active) { border-color: #60a5fa; color: #60a5fa; }
+
+/* KPI Cards */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.kpi-card {
+  background: #1e293b; border: 1px solid #1e40af; border-radius: 12px;
+  padding: 1.2rem; display: flex; flex-direction: column; gap: 0.3rem;
+}
+.kpi-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+.kpi-value { font-size: 1.9rem; font-weight: 700; color: #60a5fa; }
+.kpi-sub   { font-size: 0.8rem; color: #64748b; }
+
+/* Gráficas */
+.charts-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.charts-row  { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+
+.chart-card {
+  background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+  padding: 1.2rem;
+}
+.chart-title { font-size: 0.9rem; font-weight: 600; color: #93c5fd; margin-bottom: 1rem; }
+
+/* Tabla de alertas */
+.alertas-card {
+  background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+  padding: 1.2rem; margin-bottom: 1rem;
+}
+.alertas-title { font-size: 0.9rem; font-weight: 600; color: #f87171; margin-bottom: 1rem; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th { color: #64748b; text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #334155; }
+td { padding: 0.45rem 0.6rem; border-bottom: 1px solid #1e293b; }
+tr:hover td { background: #0f172a; }
+
+.badge {
+  padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
+}
+.badge.ALTO  { background: #7f1d1d; color: #fca5a5; }
+.badge.MEDIO { background: #78350f; color: #fcd34d; }
+.badge.BAJO  { background: #14532d; color: #86efac; }
+
+/* Selector departamento */
+select {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+  padding: 0.35rem 0.7rem; border-radius: 8px; font-size: 0.85rem;
+}
+
+/* Loading */
+.loading { color: #64748b; font-size: 0.85rem; padding: 2rem; text-align: center; }
