@@ -1,44 +1,10 @@
-# ── Ingesta de datos ─────────────────────────────────────────────────────────
-requests==2.31.0
-sodapy==2.2.0          # Cliente Socrata para datos.gov.co
-httpx==0.25.2
-
-# ── Procesamiento de datos ────────────────────────────────────────────────────
-pandas==2.1.4
-numpy==1.26.2
-geopandas==0.14.1
-shapely==2.0.2
-openpyxl==3.1.2        # Lectura de archivos Excel del DANE
-
-# ── Machine Learning ──────────────────────────────────────────────────────────
-scikit-learn==1.3.2
-xgboost==2.0.3
-prophet==1.1.5
-joblib==1.3.2          # Serialización de modelos
-
-# ── Backend ───────────────────────────────────────────────────────────────────
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.2
-python-multipart==0.0.6
-
-# ── Visualización ─────────────────────────────────────────────────────────────
-matplotlib==3.8.2
-seaborn==0.13.0
-plotly==5.18.0
-folium==0.15.1         # Mapas interactivos
-
-# ── Notebooks ─────────────────────────────────────────────────────────────────
-jupyter==1.0.0
-ipykernel==6.27.1
-nbformat==5.9.2
-
-# ── Utilidades ────────────────────────────────────────────────────────────────
-python-dotenv==1.0.0
-loguru==0.7.2
-tqdm==4.66.1
-pyyaml==6.0.1
-
-# ── Testing ───────────────────────────────────────────────────────────────────
-pytest==7.4.3
-httpx==0.25.2          # Cliente async para tests de FastAPI
+et_xmlfile==2.0.0
+numpy==2.4.4
+openpyxl==3.1.5
+pandas==3.0.2
+psycopg2-binary==2.9.12
+pyarrow==24.0.0
+python-dateutil==2.9.0.post0
+six==1.17.0
+SQLAlchemy==2.0.49
+typing_extensions==4.15.0
