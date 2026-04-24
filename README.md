@@ -111,3 +111,15 @@ Proyecto participante en **Datos al Ecosistema 2026** – Convocatoria nacional 
 ## Licencia
 
 MIT © 2026 – Equipo Colombia Epidemic Dashboard
+
+
+
+
+Prueba modelo:
+
+python -m src.ml.model --predict --month 5 --department NARIÑO --city PASTO --disease Dengue
+
+python -m src.ml.model --predict --month 8 --department CHOCO --city QUIBDO --disease Malaria
+
+python -m src.ml.model --predict --month 10 --department VALLE --city CALI --disease Chikungunya
+

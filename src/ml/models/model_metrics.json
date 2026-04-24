@@ -1,0 +1,84 @@
+{
+  "GLOBAL": {
+    "validation_metrics": {
+      "mae": 11.9598,
+      "rmse": 84.6494,
+      "r2": 0.5885,
+      "mape_non_zero_pct": 85.4836,
+      "wape_pct": 49.9242,
+      "smape_pct": 106.5889
+    },
+    "train_metrics": {
+      "mae": 4.5603,
+      "rmse": 21.4122,
+      "r2": 0.9683,
+      "mape_non_zero_pct": 49.4483,
+      "wape_pct": 19.9603,
+      "smape_pct": 94.5963
+    },
+    "best_config": "rf_balanced_sqrt",
+    "training_rows": 16980
+  },
+  "BY_DISEASE": {
+    "Chikungunya": {
+      "validation_metrics": {
+        "mae": 0.1349,
+        "rmse": 0.3963,
+        "r2": -0.1043,
+        "mape_non_zero_pct": 89.1596,
+        "wape_pct": 101.2026,
+        "smape_pct": 64.0243
+      },
+      "train_metrics": {
+        "mae": 0.0042,
+        "rmse": 0.0532,
+        "r2": 0.985,
+        "mape_non_zero_pct": 1.1909,
+        "wape_pct": 2.9101,
+        "smape_pct": 11.9858
+      },
+      "best_config": "rf_stable_log",
+      "training_rows": 372
+    },
+    "Dengue": {
+      "validation_metrics": {
+        "mae": 10.5775,
+        "rmse": 42.3055,
+        "r2": 0.844,
+        "mape_non_zero_pct": 89.7077,
+        "wape_pct": 42.6467,
+        "smape_pct": 96.0299
+      },
+      "train_metrics": {
+        "mae": 4.4497,
+        "rmse": 21.0586,
+        "r2": 0.9767,
+        "mape_non_zero_pct": 44.5381,
+        "wape_pct": 17.004,
+        "smape_pct": 77.9828
+      },
+      "best_config": "rf_balanced_sqrt",
+      "training_rows": 11832
+    },
+    "Malaria": {
+      "validation_metrics": {
+        "mae": 5.8782,
+        "rmse": 20.1887,
+        "r2": 0.8607,
+        "mape_non_zero_pct": 72.5866,
+        "wape_pct": 38.9246,
+        "smape_pct": 53.6708
+      },
+      "train_metrics": {
+        "mae": 0.2285,
+        "rmse": 3.0323,
+        "r2": 0.9978,
+        "mape_non_zero_pct": 0.3728,
+        "wape_pct": 1.3946,
+        "smape_pct": 7.2556
+      },
+      "best_config": "rf_regularized_sqrt",
+      "training_rows": 4776
+    }
+  }
+}

@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 # ── Conexión a PostgreSQL ─────────────────────────────────────────────────────
 
 DB_URL = "postgresql://{user}:{pwd}@{host}:{port}/{db}".format(
-    user=os.getenv("DB_USER", "ghostbabby"),
+    user=os.getenv("DB_USER", "postgres"),
     pwd=os.getenv("DB_PASS", ""),
     host=os.getenv("DB_HOST", "localhost"),
     port=os.getenv("DB_PORT", "5432"),

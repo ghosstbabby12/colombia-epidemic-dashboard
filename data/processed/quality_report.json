@@ -1,0 +1,178 @@
+[
+  {
+    "metric": "total_clean_rows",
+    "value": 387939
+  },
+  {
+    "metric": "total_rejected_rows",
+    "value": 54611
+  },
+  {
+    "metric": "nulls_CONSECUTIVE",
+    "value": 0
+  },
+  {
+    "metric": "nulls_COD_EVE",
+    "value": 0
+  },
+  {
+    "metric": "nulls_Nombre_evento",
+    "value": 0
+  },
+  {
+    "metric": "nulls_FEC_NOT",
+    "value": 0
+  },
+  {
+    "metric": "nulls_SEMANA",
+    "value": 0
+  },
+  {
+    "metric": "nulls_ANO",
+    "value": 0
+  },
+  {
+    "metric": "nulls_INI_SIN",
+    "value": 0
+  },
+  {
+    "metric": "nulls_EDAD",
+    "value": 0
+  },
+  {
+    "metric": "nulls_UNI_MED",
+    "value": 0
+  },
+  {
+    "metric": "nulls_SEXO",
+    "value": 0
+  },
+  {
+    "metric": "nulls_estrato",
+    "value": 16419
+  },
+  {
+    "metric": "nulls_TIP_SS",
+    "value": 0
+  },
+  {
+    "metric": "nulls_TIP_CAS",
+    "value": 0
+  },
+  {
+    "metric": "nulls_PAC_HOS",
+    "value": 0
+  },
+  {
+    "metric": "nulls_CON_FIN",
+    "value": 0
+  },
+  {
+    "metric": "nulls_GP_GESTAN",
+    "value": 0
+  },
+  {
+    "metric": "nulls_AREA",
+    "value": 0
+  },
+  {
+    "metric": "nulls_COD_DPTO_O",
+    "value": 0
+  },
+  {
+    "metric": "nulls_COD_MUN_O",
+    "value": 0
+  },
+  {
+    "metric": "nulls_Departamento_ocurrencia",
+    "value": 0
+  },
+  {
+    "metric": "nulls_Municipio_ocurrencia",
+    "value": 0
+  },
+  {
+    "metric": "nulls_Departamento_residencia",
+    "value": 0
+  },
+  {
+    "metric": "nulls_Municipio_residencia",
+    "value": 0
+  },
+  {
+    "metric": "nulls_nom_est_f_caso",
+    "value": 0
+  },
+  {
+    "metric": "nulls_confirmados",
+    "value": 0
+  },
+  {
+    "metric": "nulls_enfermedad",
+    "value": 0
+  },
+  {
+    "metric": "nulls_source_name",
+    "value": 0
+  },
+  {
+    "metric": "nulls_source_file",
+    "value": 0
+  },
+  {
+    "metric": "nulls_edad_anos",
+    "value": 0
+  },
+  {
+    "metric": "nulls_grupo_etario",
+    "value": 0
+  },
+  {
+    "metric": "nulls_tipo_caso",
+    "value": 0
+  },
+  {
+    "metric": "nulls_condicion_final",
+    "value": 0
+  },
+  {
+    "metric": "nulls_hospitalizado",
+    "value": 0
+  },
+  {
+    "metric": "nulls_area_residencia",
+    "value": 0
+  },
+  {
+    "metric": "nulls_unidad_edad",
+    "value": 0
+  },
+  {
+    "metric": "nulls_regimen_salud",
+    "value": 0
+  },
+  {
+    "metric": "nulls_dias_notificacion",
+    "value": 64
+  },
+  {
+    "metric": "rows_disease_DENGUE",
+    "value": 309627
+  },
+  {
+    "metric": "rows_disease_MALARIA",
+    "value": 78258
+  },
+  {
+    "metric": "rows_disease_CHIKUNGUNYA",
+    "value": 54
+  },
+  {
+    "metric": "duplicates_removed",
+    "value": 0
+  },
+  {
+    "metric": "total_aggregated_rows",
+    "value": 2889
+  }
+]

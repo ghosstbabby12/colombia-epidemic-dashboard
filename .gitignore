@@ -1,4 +1,6 @@
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *.pyo
@@ -10,38 +12,70 @@ venv/
 dist/
 build/
 
+# =========================
 # Entorno
+# =========================
+.env
+.env.*
+!.env.example
 
-
+# =========================
 # Jupyter
+# =========================
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# Datos crudos (pueden ser grandes; usar DVC si es necesario)
+# =========================
+# Datos crudos y procesados
+# Pueden ser grandes; usar DVC, Drive o almacenamiento externo si es necesario
+# =========================
 data/raw/*.csv
 data/raw/*.xlsx
 data/raw/*.json
 data/processed/*.csv
 data/processed/*.parquet
 
-# Modelos entrenados=
+# =========================
+# Modelos entrenados ML
+# =========================
+src/ml/models/*
+!src/ml/models/.gitkeep
 
+*.pkl
+*.joblib
+*.sav
+*.h5
+*.keras
+*.onnx
+*.pt
+*.pth
+
+# Permite conservar la carpeta vacía si necesitas que exista en el repo
+!src/ml/models/.gitkeep
+
+# =========================
 # macOS
+# =========================
 .DS_Store
 .AppleDouble
 .LSOverride
 
+# =========================
 # IDEs
+# =========================
 .vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
 
+# =========================
 # Logs
+# =========================
 *.log
 logs/
 
-# Node (frontend)
+# =========================
+# Node / Frontend
+# =========================
 node_modules/
-dist/
 .next/
