@@ -5,7 +5,7 @@ export default function LineaSemanal({ datos }) {
 
   return (
     <div className="chart-card" style={{ gridColumn: '1 / -1' }}>
-      <p className="chart-title">Casos por semana epidemiológica 2024</p>
+      <p className="chart-title">Casos por semana epidemiológica </p>
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={datos.serie}>
           <CartesianGrid strokeDasharray="3 3" stroke="#334155" />

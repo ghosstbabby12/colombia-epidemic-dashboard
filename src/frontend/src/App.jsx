@@ -1,109 +1,223 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api } from './api'
-import KpiCards          from './components/KpiCards'
-import LineaSemanal      from './components/LineaSemanal'
+
+import KpiCards from './components/KpiCards'
+import LineaSemanal from './components/LineaSemanal'
 import BarraDepartamentos from './components/BarraDepartamentos'
-import GraficaEdad       from './components/GraficaEdad'
-import GraficaSexo       from './components/GraficaSexo'
-import TablaAlertas      from './components/TablaAlertas'
+import TablaAlertas from './components/TablaAlertas'
+import PredictionPanel from './components/PredictionPanel'
+import PowerBIEmbed from './components/PowerBIEmbed'
+import Recomendaciones from './components/Recomendaciones'
 
 const ENFERMEDADES = ['Dengue', 'Malaria', 'Chikungunya']
 
 export default function App() {
+  const [activeSection, setActiveSection] = useState('dashboard')
+
   const [enfermedad, setEnfermedad] = useState('Dengue')
-  const [dpto, setDpto]             = useState('')
-  const [dptos, setDptos]           = useState([])
+  const [dpto, setDpto] = useState('')
+  const [dptos, setDptos] = useState([])
 
-  const [resumen,      setResumen]      = useState(null)
-  const [semana,       setSemana]       = useState(null)
-  const [departamentos,setDepartamentos]= useState(null)
-  const [edad,         setEdad]         = useState(null)
-  const [sexo,         setSexo]         = useState(null)
-  const [alertas,      setAlertas]      = useState(null)
+  const [resumen, setResumen] = useState(null)
+  const [semana, setSemana] = useState(null)
+  const [departamentos, setDepartamentos] = useState(null)
+  const [alertas, setAlertas] = useState(null)
 
-  // Cargar lista de departamentos al inicio
+  const [apiStatus, setApiStatus] = useState('Conectando...')
+  const [dashboardError, setDashboardError] = useState('')
+
   useEffect(() => {
-    api.casosDepartamento('Dengue', 33)
-      .then(r => setDptos(r.data.ranking.map(d => d.departamento)))
-      .catch(console.error)
-    api.resumen().then(r => setResumen(r.data)).catch(console.error)
-    api.alertas().then(r => setAlertas(r.data)).catch(console.error)
+    api.health()
+      .then((response) => {
+        setApiStatus(response.data.status === 'ok' ? 'Supabase conectado' : 'Sin conexión')
+      })
+      .catch(() => {
+        setApiStatus('Sin conexión')
+      })
+
+    api.resumen()
+      .then((response) => {
+        setResumen(response.data)
+      })
+      .catch((error) => {
+        console.error(error)
+        setResumen({ por_enfermedad: [], pico_epidemico_dengue: {} })
+      })
+
+    api.alertas()
+      .then((response) => {
+        setAlertas(response.data)
+      })
+      .catch((error) => {
+        console.error(error)
+        setAlertas({
+          total_alertas: 0,
+          criterio: 'No fue posible cargar alertas.',
+          alertas: [],
+        })
+      })
   }, [])
 
-  // Recargar gráficas cuando cambia enfermedad o departamento
+  useEffect(() => {
+    setDptos([])
+
+    api.casosDepartamento(enfermedad, 40)
+      .then((response) => {
+        setDptos(response.data.ranking.map((item) => item.departamento))
+      })
+      .catch((error) => {
+        console.error(error)
+        setDptos([])
+      })
+  }, [enfermedad])
+
   const cargarDatos = useCallback(() => {
+    setDashboardError('')
+    setSemana(null)
+    setDepartamentos(null)
+
     api.casosSemana(enfermedad, dpto)
-      .then(r => setSemana(r.data)).catch(console.error)
+      .then((response) => {
+        setSemana(response.data)
+      })
+      .catch((error) => {
+        console.error(error)
+        setSemana({ serie: [] })
+        setDashboardError('Algunas métricas no pudieron cargarse correctamente.')
+      })
+
     api.casosDepartamento(enfermedad)
-      .then(r => setDepartamentos(r.data)).catch(console.error)
-    api.grupoEtario(enfermedad, dpto)
-      .then(r => setEdad(r.data)).catch(console.error)
-    api.sexo(enfermedad, dpto)
-      .then(r => setSexo(r.data)).catch(console.error)
+      .then((response) => {
+        setDepartamentos(response.data)
+      })
+      .catch((error) => {
+        console.error(error)
+        setDepartamentos({ ranking: [] })
+        setDashboardError('Algunas métricas no pudieron cargarse correctamente.')
+      })
   }, [enfermedad, dpto])
 
-  useEffect(() => { cargarDatos() }, [cargarDatos])
+  useEffect(() => {
+    cargarDatos()
+  }, [cargarDatos])
+
+  const navItems = [
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'prediccion', label: 'Predicción ML' },
+    { id: 'powerbi', label: 'Power BI' },
+  ]
 
   return (
     <div className="dashboard">
-      {/* Header */}
       <header className="header">
-        <div>
-          <h1>Dashboard Epidemiológico Colombia</h1>
-          <span>Datos SIVIGILA 2024 — INS Colombia</span>
-        </div>
-        <span style={{ color: '#22c55e', fontSize: '0.8rem' }}>● API conectada</span>
-      </header>
+        <div className="brand">
+          <div className="brand-icon">🦟</div>
 
-      <main className="main">
-        {/* Selector de enfermedad + departamento */}
-        <div className="selector-bar">
-          {ENFERMEDADES.map(e => (
-            <button key={e}
-              className={`btn-enf ${enfermedad === e ? 'active' : ''}`}
-              onClick={() => setEnfermedad(e)}>
-              {e}
-            </button>
-          ))}
-          <select value={dpto} onChange={e => setDpto(e.target.value)} style={{ marginLeft: 'auto' }}>
-            <option value="">— Todos los departamentos —</option>
-            {dptos.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </div>
-
-        {/* KPIs */}
-        <KpiCards resumen={resumen} enfermedad={enfermedad} />
-
-        {/* Serie temporal — ancho completo */}
-        <div style={{ marginBottom: '1rem' }}>
-          <LineaSemanal datos={semana} />
-        </div>
-
-        {/* Departamentos + Edad */}
-        <div className="charts-grid">
-          <BarraDepartamentos datos={departamentos} />
-          <GraficaEdad datos={edad} />
-        </div>
-
-        {/* Sexo */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1rem', marginBottom: '1rem' }}>
-          <GraficaSexo datos={sexo} />
-          <div className="chart-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ textAlign: 'center', color: '#475569' }}>
-              <p style={{ fontSize: '2rem' }}>🗺️</p>
-              <p style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>Mapa coroplético</p>
-              <p style={{ fontSize: '0.75rem', marginTop: '0.3rem' }}>Próxima versión</p>
-            </div>
+          <div>
+            <h1>Dashboard Epidemiológico Colombia</h1>
+            <span>Datos SIVIGILA  · Supabase · Predicción ML</span>
           </div>
         </div>
 
-        {/* Alertas */}
-        <TablaAlertas datos={alertas} />
+        <nav className="nav-tabs">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              className={activeSection === item.id ? 'active' : ''}
+              onClick={() => setActiveSection(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
 
-        {/* Footer */}
-        <p style={{ textAlign: 'center', color: '#334155', fontSize: '0.75rem', paddingTop: '1rem' }}>
-          Datos al Ecosistema 2026 · Fuente: SIVIGILA – INS Colombia · API: localhost:8000
-        </p>
+        <span className={apiStatus.includes('conectado') ? 'status-ok' : 'status-error'}>
+          ● {apiStatus}
+        </span>
+      </header>
+
+      <main className="main">
+        {activeSection === 'dashboard' && (
+          <>
+            <section className="hero-mini">
+              <span className="eyebrow">Vigilancia epidemiológica</span>
+              <h2>Exploración de enfermedades transmitidas por mosquitos</h2>
+              <p>
+                Visualiza casos, tendencias semanales, distribución por departamento,
+                alertas epidemiológicas y recomendaciones de salud pública.
+              </p>
+            </section>
+
+            <div className="selector-bar">
+              {ENFERMEDADES.map((item) => (
+                <button
+                  key={item}
+                  className={`btn-enf ${enfermedad === item ? 'active' : ''}`}
+                  onClick={() => {
+                    setEnfermedad(item)
+                    setDpto('')
+                  }}
+                >
+                  {item}
+                </button>
+              ))}
+
+              <select
+                value={dpto}
+                onChange={(event) => setDpto(event.target.value)}
+              >
+                <option value="">— Todos los departamentos —</option>
+                {dptos.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {dashboardError && (
+              <div className="dashboard-warning">
+                ⚠️ {dashboardError}
+              </div>
+            )}
+
+            <KpiCards resumen={resumen} enfermedad={enfermedad} />
+
+            <div className="wide-block">
+              <LineaSemanal datos={semana} />
+            </div>
+
+            <div className="wide-block">
+              <BarraDepartamentos datos={departamentos} />
+            </div>
+
+            <div className="chart-card info-disease-card" style={{ marginBottom: '1rem' }}>
+              <span>🛡️</span>
+              <h3>Prevención recomendada</h3>
+              <p>
+                Elimina aguas estancadas, tapa recipientes, usa repelente en zonas
+                de riesgo y consulta oportunamente ante fiebre, dolor muscular o
+                síntomas persistentes.
+              </p>
+            </div>
+
+            <TablaAlertas datos={alertas} />
+
+            <Recomendaciones
+              alertas={alertas}
+              enfermedad={enfermedad}
+              dpto={dpto}
+            />
+          </>
+        )}
+
+        {activeSection === 'prediccion' && <PredictionPanel />}
+
+        {activeSection === 'powerbi' && <PowerBIEmbed />}
+
+        <footer className="footer">
+          Fuente: SIVIGILA – INS Colombia · ETL con Scrapy · Supabase · Random Forest · Power BI
+        </footer>
       </main>
     </div>
   )
