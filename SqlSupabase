@@ -1,0 +1,319 @@
+-- ============================================================
+-- SCHEMA FOR COLOMBIA EPIDEMIOLOGICAL DASHBOARD
+-- Supabase PostgreSQL + REST API
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.casos_individuales (
+    id BIGSERIAL PRIMARY KEY,
+    "CONSECUTIVE" TEXT,
+    "COD_EVE" INTEGER,
+    "Nombre_evento" TEXT,
+    "FEC_NOT" TIMESTAMP,
+    "SEMANA" INTEGER,
+    "ANO" INTEGER,
+    "INI_SIN" TIMESTAMP,
+    "EDAD" INTEGER,
+    "UNI_MED" INTEGER,
+    "SEXO" TEXT,
+    estrato INTEGER,
+    "TIP_SS" TEXT,
+    "TIP_CAS" INTEGER,
+    "PAC_HOS" INTEGER,
+    "CON_FIN" INTEGER,
+    "GP_GESTAN" INTEGER,
+    "AREA" INTEGER,
+    "COD_DPTO_O" TEXT,
+    "COD_MUN_O" TEXT,
+    "Departamento_ocurrencia" TEXT,
+    "Municipio_ocurrencia" TEXT,
+    "Departamento_residencia" TEXT,
+    "Municipio_residencia" TEXT,
+    nom_est_f_caso TEXT,
+    confirmados INTEGER,
+    enfermedad TEXT,
+    source_name TEXT,
+    source_file TEXT,
+    edad_anos NUMERIC,
+    grupo_etario TEXT,
+    tipo_caso TEXT,
+    condicion_final TEXT,
+    hospitalizado TEXT,
+    area_residencia TEXT,
+    unidad_edad TEXT,
+    regimen_salud TEXT,
+    dias_notificacion NUMERIC
+);
+
+CREATE TABLE IF NOT EXISTS public.casos_agregados (
+    id BIGSERIAL PRIMARY KEY,
+    enfermedad TEXT,
+    "año" INTEGER,
+    "SEMANA" INTEGER,
+    departamento TEXT,
+    total_casos BIGINT,
+    confirmados BIGINT,
+    hospitalizados BIGINT,
+    fallecidos BIGINT,
+    edad_promedio NUMERIC,
+    pct_femenino NUMERIC,
+    cod_dpto TEXT,
+    month INTEGER,
+    risk_label TEXT
+);
+
+CREATE TABLE IF NOT EXISTS public.ml_predictions (
+    id BIGSERIAL PRIMARY KEY,
+    disease TEXT NOT NULL,
+    month INTEGER NOT NULL,
+    department TEXT NOT NULL,
+    city TEXT NOT NULL,
+    estimated_cases INTEGER NOT NULL,
+    estimated_outbreak_proxy INTEGER NOT NULL,
+    outbreak_level TEXT NOT NULL,
+    model_used TEXT,
+    thermal_floor TEXT,
+    avg_temp_c NUMERIC,
+    precipitation_mm NUMERIC,
+    humidity_pct NUMERIC,
+    tropical_score NUMERIC,
+    climate_risk_score NUMERIC,
+    is_rainy_season INTEGER,
+    is_vector_favorable TEXT,
+    cases_previous_month NUMERIC,
+    cases_previous_2_month_mean NUMERIC,
+    cases_previous_3_month_mean NUMERIC,
+    validation_r2 NUMERIC,
+    validation_mae NUMERIC,
+    validation_wape_pct NUMERIC,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (disease, month, department, city)
+);
+
+CREATE TABLE IF NOT EXISTS public.etl_load_metadata (
+    id BIGSERIAL PRIMARY KEY,
+    loaded_at TIMESTAMPTZ DEFAULT NOW(),
+    source TEXT NOT NULL,
+    clean_rows BIGINT,
+    aggregated_rows BIGINT,
+    prediction_rows BIGINT
+);
+
+-- ============================================================
+-- INDEXES
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_casos_ind_enfermedad
+ON public.casos_individuales (enfermedad);
+
+CREATE INDEX IF NOT EXISTS idx_casos_ind_semana
+ON public.casos_individuales ("SEMANA", "ANO");
+
+CREATE INDEX IF NOT EXISTS idx_casos_ind_dpto
+ON public.casos_individuales ("Departamento_ocurrencia");
+
+CREATE INDEX IF NOT EXISTS idx_casos_ind_mun
+ON public.casos_individuales ("Municipio_ocurrencia");
+
+CREATE INDEX IF NOT EXISTS idx_casos_agg_enfermedad
+ON public.casos_agregados (enfermedad);
+
+CREATE INDEX IF NOT EXISTS idx_casos_agg_dpto
+ON public.casos_agregados (departamento);
+
+CREATE INDEX IF NOT EXISTS idx_casos_agg_semana
+ON public.casos_agregados ("SEMANA", "año");
+
+CREATE INDEX IF NOT EXISTS idx_ml_predictions_query
+ON public.ml_predictions (disease, month, department, city);
+
+-- ============================================================
+-- VIEWS FOR FRONTEND
+-- ============================================================
+
+CREATE OR REPLACE VIEW public.v_resumen_enfermedad AS
+SELECT
+    INITCAP(enfermedad) AS enfermedad,
+    COUNT(*)::BIGINT AS total_casos,
+    SUM(CASE WHEN hospitalizado = 'Hospitalizado' THEN 1 ELSE 0 END)::BIGINT AS hospitalizados,
+    ROUND(AVG(edad_anos)::NUMERIC, 2) AS edad_promedio,
+    ROUND(
+        100.0 * AVG(CASE WHEN "SEXO" = 'F' THEN 1 ELSE 0 END)::NUMERIC,
+        2
+    ) AS pct_femenino
+FROM public.casos_individuales
+GROUP BY enfermedad;
+
+CREATE OR REPLACE VIEW public.v_pico_epidemico_dengue AS
+SELECT
+    "SEMANA" AS semana_pico,
+    SUM(total_casos)::BIGINT AS casos_pico
+FROM public.casos_agregados
+WHERE UPPER(enfermedad) = 'DENGUE'
+GROUP BY "SEMANA"
+ORDER BY casos_pico DESC
+LIMIT 1;
+
+CREATE OR REPLACE VIEW public.v_casos_semana AS
+SELECT
+    INITCAP(enfermedad) AS enfermedad,
+    INITCAP(departamento) AS departamento,
+    "SEMANA" AS semana,
+    SUM(total_casos)::BIGINT AS casos,
+    SUM(hospitalizados)::BIGINT AS hospitalizados
+FROM public.casos_agregados
+GROUP BY enfermedad, departamento, "SEMANA";
+
+CREATE OR REPLACE VIEW public.v_casos_departamento AS
+SELECT
+    INITCAP(enfermedad) AS enfermedad,
+    INITCAP(departamento) AS departamento,
+    SUM(total_casos)::BIGINT AS casos
+FROM public.casos_agregados
+GROUP BY enfermedad, departamento;
+
+CREATE OR REPLACE VIEW public.v_casos_municipio AS
+SELECT
+    INITCAP(enfermedad) AS enfermedad,
+    INITCAP("Departamento_ocurrencia") AS departamento,
+    INITCAP("Municipio_ocurrencia") AS municipio,
+    COUNT(*)::BIGINT AS casos
+FROM public.casos_individuales
+WHERE "Municipio_ocurrencia" IS NOT NULL
+  AND "Municipio_ocurrencia" <> 'SIN_DATO'
+GROUP BY enfermedad, "Departamento_ocurrencia", "Municipio_ocurrencia";
+
+CREATE OR REPLACE VIEW public.v_grupo_etario AS
+SELECT
+    INITCAP(enfermedad) AS enfermedad,
+    INITCAP("Departamento_ocurrencia") AS departamento,
+    grupo_etario,
+    COUNT(*)::BIGINT AS casos
+FROM public.casos_individuales
+GROUP BY enfermedad, "Departamento_ocurrencia", grupo_etario;
+
+CREATE OR REPLACE VIEW public.v_sexo AS
+WITH base AS (
+    SELECT
+        INITCAP(enfermedad) AS enfermedad,
+        INITCAP("Departamento_ocurrencia") AS departamento,
+        "SEXO" AS sexo
+    FROM public.casos_individuales
+    WHERE "SEXO" IN ('M', 'F')
+),
+counts AS (
+    SELECT
+        enfermedad,
+        departamento,
+        sexo,
+        COUNT(*)::BIGINT AS casos
+    FROM base
+    GROUP BY enfermedad, departamento, sexo
+)
+SELECT
+    enfermedad,
+    departamento,
+    sexo,
+    casos,
+    ROUND(100.0 * casos / NULLIF(SUM(casos) OVER (PARTITION BY enfermedad, departamento), 0), 2) AS porcentaje
+FROM counts;
+
+CREATE OR REPLACE VIEW public.v_alertas_dengue AS
+WITH weekly AS (
+    SELECT
+        INITCAP(departamento) AS departamento,
+        "SEMANA" AS semana,
+        SUM(total_casos)::BIGINT AS casos_semana
+    FROM public.casos_agregados
+    WHERE UPPER(enfermedad) = 'DENGUE'
+    GROUP BY departamento, "SEMANA"
+),
+stats AS (
+    SELECT
+        departamento,
+        AVG(casos_semana)::NUMERIC AS promedio_historico
+    FROM weekly
+    GROUP BY departamento
+),
+latest AS (
+    SELECT MAX(semana) AS max_semana
+    FROM weekly
+)
+SELECT
+    w.departamento,
+    w.semana,
+    w.casos_semana,
+    ROUND(s.promedio_historico, 2) AS promedio_historico,
+    ROUND((w.casos_semana / NULLIF(s.promedio_historico, 0))::NUMERIC, 2) AS ratio,
+    CASE
+        WHEN w.casos_semana >= s.promedio_historico * 2 THEN 'ALTO'
+        WHEN w.casos_semana >= s.promedio_historico * 1.5 THEN 'MEDIO'
+        ELSE 'BAJO'
+    END AS nivel_alerta
+FROM weekly w
+JOIN stats s ON s.departamento = w.departamento
+JOIN latest l ON l.max_semana = w.semana
+WHERE w.casos_semana >= s.promedio_historico * 1.2
+ORDER BY ratio DESC;
+
+-- ============================================================
+-- RESET FUNCTION FOR ETL SCRIPT
+-- Only service_role should execute this.
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.reset_epidemiology_tables()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    TRUNCATE TABLE public.ml_predictions RESTART IDENTITY;
+    TRUNCATE TABLE public.casos_agregados RESTART IDENTITY CASCADE;
+    TRUNCATE TABLE public.casos_individuales RESTART IDENTITY CASCADE;
+    TRUNCATE TABLE public.etl_load_metadata RESTART IDENTITY;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.reset_epidemiology_tables() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.reset_epidemiology_tables() FROM anon;
+REVOKE ALL ON FUNCTION public.reset_epidemiology_tables() FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.reset_epidemiology_tables() TO service_role;
+
+-- ============================================================
+-- RLS
+-- Frontend anon key can only read.
+-- Service role can load data.
+-- ============================================================
+
+ALTER TABLE public.casos_individuales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.casos_agregados ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ml_predictions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.etl_load_metadata ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public read casos_individuales" ON public.casos_individuales;
+CREATE POLICY "Allow public read casos_individuales"
+ON public.casos_individuales
+FOR SELECT
+TO anon, authenticated
+USING (true);
+
+DROP POLICY IF EXISTS "Allow public read casos_agregados" ON public.casos_agregados;
+CREATE POLICY "Allow public read casos_agregados"
+ON public.casos_agregados
+FOR SELECT
+TO anon, authenticated
+USING (true);
+
+DROP POLICY IF EXISTS "Allow public read ml_predictions" ON public.ml_predictions;
+CREATE POLICY "Allow public read ml_predictions"
+ON public.ml_predictions
+FOR SELECT
+TO anon, authenticated
+USING (true);
+
+DROP POLICY IF EXISTS "Allow public read etl_load_metadata" ON public.etl_load_metadata;
+CREATE POLICY "Allow public read etl_load_metadata"
+ON public.etl_load_metadata
+FOR SELECT
+TO anon, authenticated
+USING (true);

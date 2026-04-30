@@ -1,7 +1,9 @@
 """
-Random Forest model for mosquito-borne disease outbreak prediction in Colombia.
+High-accuracy Random Forest model for mosquito-borne disease outbreak prediction
+in Colombia.
 
-This module trains optimized Random Forest models using the cleaned SIVIGILA dataset.
+This module trains compressed Random Forest models using the cleaned SIVIGILA
+dataset.
 
 Main goal:
     Predict estimated outbreak/case volume for a given:
@@ -19,6 +21,15 @@ Usage:
     python -m src.ml.model --train
 
     python -m src.ml.model --predict --month 5 --department NARIÑO --city PASTO --disease Dengue
+
+Important:
+    This version prioritizes prediction accuracy by:
+    - Training a global model.
+    - Training disease-specific models.
+    - Adding stronger temporal features.
+    - Adding local historical prior features.
+    - Blending Random Forest prediction with historical local priors.
+    - Compressing model.pkl with joblib xz compression.
 """
 
 import argparse
@@ -73,8 +84,19 @@ METRICS_PATH = MODELS_DIR / "model_metrics.json"
 # -----------------------------------------------------------------------------
 
 TARGET_COL = "total_cases"
+PREDICTION_YEAR = 2024
+RANDOM_STATE = 42
 
-MIN_ROWS_FOR_DISEASE_MODEL = 80
+# Comentario:
+# Se activa para mejorar precisión. Esto aumenta el tamaño del model.pkl,
+# pero permite que Dengue, Malaria y Chikungunya aprendan patrones propios.
+TRAIN_DISEASE_SPECIFIC_MODELS = True
+
+# Comentario:
+# Compresión fuerte para compensar el mayor tamaño del modelo.
+MODEL_COMPRESSION = ("xz", 6)
+
+MIN_ROWS_FOR_DISEASE_MODEL = 120
 
 CATEGORICAL_FEATURES = [
     "disease",
@@ -88,9 +110,12 @@ CATEGORICAL_FEATURES = [
 NUMERIC_FEATURES = [
     "year",
     "month",
+    "quarter",
+    "semester",
     "month_sin",
     "month_cos",
     "is_rainy_season",
+    "is_high_transmission_month",
     "avg_temp_c",
     "precipitation_mm",
     "humidity_pct",
@@ -99,15 +124,27 @@ NUMERIC_FEATURES = [
     "cases_previous_month",
     "cases_previous_2_month_mean",
     "cases_previous_3_month_mean",
+    "cases_previous_6_month_mean",
+    "cases_previous_3_month_sum",
+    "cases_previous_6_month_sum",
+    "cases_trend_1m",
+    "cases_trend_3m",
     "department_global_mean_cases",
     "municipality_global_mean_cases",
     "department_month_mean_cases",
     "municipality_month_mean_cases",
     "department_disease_mean_cases",
     "municipality_disease_mean_cases",
+    "department_disease_month_mean_cases",
+    "municipality_disease_month_mean_cases",
+    "disease_month_mean_cases",
+    "national_month_mean_cases",
+    "municipality_share_in_department_month",
 ]
 
 ALL_FEATURES = CATEGORICAL_FEATURES + NUMERIC_FEATURES
+
+_MODEL_BUNDLE_CACHE: dict[str, Any] | None = None
 
 
 # -----------------------------------------------------------------------------
@@ -365,6 +402,46 @@ DEFAULT_CLIMATE_PROFILE = {
 
 
 # -----------------------------------------------------------------------------
+# Prediction blend configuration
+# -----------------------------------------------------------------------------
+
+BLEND_CONFIGS = [
+    {
+        "name": "pure_model",
+        "weights": {
+            "model": 1.00,
+        },
+    },
+    {
+        "name": "model_plus_municipality_month",
+        "weights": {
+            "model": 0.60,
+            "municipality_disease_month_mean_cases": 0.25,
+            "municipality_month_mean_cases": 0.15,
+        },
+    },
+    {
+        "name": "model_plus_local_history",
+        "weights": {
+            "model": 0.50,
+            "municipality_disease_month_mean_cases": 0.25,
+            "municipality_disease_mean_cases": 0.15,
+            "cases_previous_3_month_mean": 0.10,
+        },
+    },
+    {
+        "name": "model_plus_strong_local_prior",
+        "weights": {
+            "model": 0.42,
+            "municipality_disease_month_mean_cases": 0.35,
+            "municipality_disease_mean_cases": 0.13,
+            "department_disease_month_mean_cases": 0.10,
+        },
+    },
+]
+
+
+# -----------------------------------------------------------------------------
 # Text normalization
 # -----------------------------------------------------------------------------
 
@@ -501,7 +578,7 @@ def get_month_from_row(row: pd.Series) -> Any:
 
 
 def add_climate_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Adds thermal floor and climate variables."""
+    """Adds thermal floor, seasonality and climate variables."""
 
     df = df.copy()
 
@@ -513,7 +590,17 @@ def add_climate_features(df: pd.DataFrame) -> pd.DataFrame:
     df["humidity_pct"] = profiles.apply(lambda profile: profile["humidity_pct"])
     df["tropical_score"] = profiles.apply(lambda profile: profile["tropical_score"])
 
+    df["month"] = pd.to_numeric(df["month"], errors="coerce").astype(int)
+
+    df["quarter"] = (((df["month"] - 1) // 3) + 1).astype(int)
+    df["semester"] = np.where(df["month"] <= 6, 1, 2).astype(int)
+
     df["is_rainy_season"] = df["month"].apply(lambda month: is_rainy_month(int(month)))
+
+    # Comentario:
+    # Meses donde suele aumentar la favorabilidad por lluvia, humedad
+    # y acumulación de criaderos.
+    df["is_high_transmission_month"] = df["month"].isin([3, 4, 5, 6, 10, 11]).astype(int)
 
     df["is_tropical_climate"] = np.where(
         df["tropical_score"] >= 0.70,
@@ -548,11 +635,11 @@ def add_climate_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Adds previous-month features.
+    Adds previous-month and rolling temporal features.
 
     Comentario:
-    Estas variables mejoran bastante el rendimiento porque los brotes suelen
-    tener continuidad temporal.
+    Estas variables ayudan a capturar continuidad temporal, aceleración del brote
+    y persistencia municipal.
     """
 
     df = df.copy()
@@ -562,25 +649,57 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
 
     group_cols = ["disease", "department", "municipality"]
 
-    df["cases_previous_month"] = (
-        df.groupby(group_cols)[TARGET_COL]
-        .shift(1)
-        .fillna(0)
-        .astype(float)
-    )
+    grouped_cases = df.groupby(group_cols)[TARGET_COL]
+
+    previous_1 = grouped_cases.shift(1)
+    previous_2 = grouped_cases.shift(2)
+    previous_3 = grouped_cases.shift(3)
+
+    df["cases_previous_month"] = previous_1.fillna(0).astype(float)
 
     df["cases_previous_2_month_mean"] = (
-        df.groupby(group_cols)[TARGET_COL]
+        grouped_cases
         .transform(lambda series: series.shift(1).rolling(2, min_periods=1).mean())
         .fillna(0)
         .astype(float)
     )
 
     df["cases_previous_3_month_mean"] = (
-        df.groupby(group_cols)[TARGET_COL]
+        grouped_cases
         .transform(lambda series: series.shift(1).rolling(3, min_periods=1).mean())
         .fillna(0)
         .astype(float)
+    )
+
+    df["cases_previous_6_month_mean"] = (
+        grouped_cases
+        .transform(lambda series: series.shift(1).rolling(6, min_periods=1).mean())
+        .fillna(0)
+        .astype(float)
+    )
+
+    df["cases_previous_3_month_sum"] = (
+        grouped_cases
+        .transform(lambda series: series.shift(1).rolling(3, min_periods=1).sum())
+        .fillna(0)
+        .astype(float)
+    )
+
+    df["cases_previous_6_month_sum"] = (
+        grouped_cases
+        .transform(lambda series: series.shift(1).rolling(6, min_periods=1).sum())
+        .fillna(0)
+        .astype(float)
+    )
+
+    df["cases_trend_1m"] = (
+        previous_1.fillna(0).astype(float)
+        - previous_2.fillna(0).astype(float)
+    )
+
+    df["cases_trend_3m"] = (
+        df["cases_previous_3_month_mean"]
+        - df["cases_previous_6_month_mean"]
     )
 
     return df
@@ -590,10 +709,9 @@ def build_training_dataset(clean_df: pd.DataFrame) -> pd.DataFrame:
     """
     Builds balanced monthly model training dataset from individual clean cases.
 
-    Improvement:
-        The old version only trained with months where cases existed.
-        This version creates a complete 12-month panel per disease + municipality,
-        filling missing months with 0 cases.
+    Comentario:
+    Crea un panel mensual completo por enfermedad + municipio. Los meses sin
+    casos se rellenan con 0 para que el modelo aprenda presencia y ausencia.
     """
 
     df = clean_df.copy()
@@ -657,7 +775,11 @@ def build_training_dataset(clean_df: pd.DataFrame) -> pd.DataFrame:
     entity_panel["_tmp_key"] = 1
     months["_tmp_key"] = 1
 
-    full_panel = entity_panel.merge(months, on="_tmp_key", how="outer").drop(columns="_tmp_key")
+    full_panel = (
+        entity_panel
+        .merge(months, on="_tmp_key", how="outer")
+        .drop(columns="_tmp_key")
+    )
 
     grouped = full_panel.merge(
         positive_counts,
@@ -698,8 +820,8 @@ def fit_prior_maps(df: pd.DataFrame) -> dict[str, Any]:
     Fits historical prior maps using only a given dataset split.
 
     Comentario:
-    Esto evita fuga de información en evaluación, porque los promedios del test
-    no se usan para construir las variables del test.
+    Estos priors son fundamentales para mejorar la predicción por municipio,
+    enfermedad y mes.
     """
 
     global_mean = float(df[TARGET_COL].mean()) if len(df) else 0.0
@@ -712,6 +834,10 @@ def fit_prior_maps(df: pd.DataFrame) -> dict[str, Any]:
         "municipality_month_mean_cases": {},
         "department_disease_mean_cases": {},
         "municipality_disease_mean_cases": {},
+        "department_disease_month_mean_cases": {},
+        "municipality_disease_month_mean_cases": {},
+        "disease_month_mean_cases": {},
+        "national_month_mean_cases": {},
         "monthly_cases": {},
     }
 
@@ -737,6 +863,21 @@ def fit_prior_maps(df: pd.DataFrame) -> dict[str, Any]:
     for keys, value in df.groupby(["disease", "department", "municipality"])[TARGET_COL].mean().items():
         disease, department, municipality = keys
         priors["municipality_disease_mean_cases"][make_key(disease, department, municipality)] = float(value)
+
+    for keys, value in df.groupby(["disease", "department", "month"])[TARGET_COL].mean().items():
+        disease, department, month = keys
+        priors["department_disease_month_mean_cases"][make_key(disease, department, month)] = float(value)
+
+    for keys, value in df.groupby(["disease", "department", "municipality", "month"])[TARGET_COL].mean().items():
+        disease, department, municipality, month = keys
+        priors["municipality_disease_month_mean_cases"][make_key(disease, department, municipality, month)] = float(value)
+
+    for keys, value in df.groupby(["disease", "month"])[TARGET_COL].mean().items():
+        disease, month = keys
+        priors["disease_month_mean_cases"][make_key(disease, month)] = float(value)
+
+    for month, value in df.groupby("month")[TARGET_COL].mean().items():
+        priors["national_month_mean_cases"][make_key(month)] = float(value)
 
     for keys, value in df.groupby(["disease", "department", "municipality", "month"])[TARGET_COL].mean().items():
         disease, department, municipality, month = keys
@@ -828,6 +969,59 @@ def apply_prior_features(df: pd.DataFrame, priors: dict[str, Any]) -> pd.DataFra
         axis=1,
     )
 
+    df["department_disease_month_mean_cases"] = df.apply(
+        lambda row: lookup_value(
+            priors,
+            "department_disease_month_mean_cases",
+            make_key(row["disease"], row["department"], row["month"]),
+            row["department_disease_mean_cases"],
+        ),
+        axis=1,
+    )
+
+    df["municipality_disease_month_mean_cases"] = df.apply(
+        lambda row: lookup_value(
+            priors,
+            "municipality_disease_month_mean_cases",
+            make_key(row["disease"], row["department"], row["municipality"], row["month"]),
+            row["municipality_disease_mean_cases"],
+        ),
+        axis=1,
+    )
+
+    df["disease_month_mean_cases"] = df.apply(
+        lambda row: lookup_value(
+            priors,
+            "disease_month_mean_cases",
+            make_key(row["disease"], row["month"]),
+            global_mean,
+        ),
+        axis=1,
+    )
+
+    df["national_month_mean_cases"] = df.apply(
+        lambda row: lookup_value(
+            priors,
+            "national_month_mean_cases",
+            make_key(row["month"]),
+            global_mean,
+        ),
+        axis=1,
+    )
+
+    df["municipality_share_in_department_month"] = (
+        df["municipality_month_mean_cases"]
+        / df["department_month_mean_cases"].replace(0, np.nan)
+    )
+
+    df["municipality_share_in_department_month"] = (
+        df["municipality_share_in_department_month"]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0)
+        .clip(lower=0, upper=10)
+        .astype(float)
+    )
+
     return df
 
 
@@ -868,7 +1062,7 @@ def create_one_hot_encoder() -> OneHotEncoder:
 
 
 def build_model_pipeline(params: dict[str, Any]) -> Pipeline:
-    """Builds preprocessing + Random Forest pipeline."""
+    """Builds preprocessing + stronger Random Forest pipeline."""
 
     categorical_transformer = Pipeline(
         steps=[
@@ -892,13 +1086,15 @@ def build_model_pipeline(params: dict[str, Any]) -> Pipeline:
     )
 
     model = RandomForestRegressor(
-        n_estimators=params.get("n_estimators", 800),
-        max_depth=params.get("max_depth", None),
+        n_estimators=params.get("n_estimators", 500),
+        max_depth=params.get("max_depth", 26),
         min_samples_split=params.get("min_samples_split", 2),
         min_samples_leaf=params.get("min_samples_leaf", 1),
-        max_features=params.get("max_features", "sqrt"),
+        max_features=params.get("max_features", 0.85),
+        max_leaf_nodes=params.get("max_leaf_nodes", None),
+        max_samples=params.get("max_samples", None),
         bootstrap=True,
-        random_state=42,
+        random_state=RANDOM_STATE,
         n_jobs=-1,
     )
 
@@ -939,7 +1135,8 @@ def build_sample_weights(y: np.ndarray) -> np.ndarray:
     Builds sample weights to give more importance to outbreak rows.
 
     Comentario:
-    El modelo anterior aprendía mucho de los casos bajos y poco de los brotes altos.
+    Se conserva porque ayuda a que el modelo no aprenda solo los meses con
+    pocos casos.
     """
 
     return 1.0 + np.log1p(y)
@@ -987,62 +1184,65 @@ def evaluate_predictions(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, fl
 
 
 def get_candidate_configs() -> list[dict[str, Any]]:
-    """Returns candidate Random Forest configurations."""
+    """
+    Returns stronger Random Forest configurations.
+
+    Comentario:
+    Estas configuraciones priorizan precisión. El archivo pesará más que la
+    versión slim, pero seguirá comprimido con xz.
+    """
 
     return [
         {
-            "name": "rf_balanced_deep_log",
-            "target_transform": "log1p",
+            "name": "rf_accuracy_sqrt_350",
+            "target_transform": "sqrt",
             "params": {
-                "n_estimators": 900,
-                "max_depth": None,
+                "n_estimators": 350,
+                "max_depth": 22,
+                "min_samples_split": 3,
+                "min_samples_leaf": 1,
+                "max_features": 0.80,
+                "max_leaf_nodes": 1600,
+                "max_samples": 0.98,
+            },
+        },
+        {
+            "name": "rf_accuracy_sqrt_500",
+            "target_transform": "sqrt",
+            "params": {
+                "n_estimators": 500,
+                "max_depth": 26,
                 "min_samples_split": 2,
                 "min_samples_leaf": 1,
-                "max_features": "sqrt",
+                "max_features": 0.85,
+                "max_leaf_nodes": 2400,
+                "max_samples": None,
             },
         },
         {
-            "name": "rf_stable_log",
+            "name": "rf_accuracy_log_500",
             "target_transform": "log1p",
             "params": {
-                "n_estimators": 800,
+                "n_estimators": 500,
                 "max_depth": 26,
-                "min_samples_split": 3,
+                "min_samples_split": 2,
                 "min_samples_leaf": 1,
-                "max_features": 0.75,
+                "max_features": 0.85,
+                "max_leaf_nodes": 2400,
+                "max_samples": None,
             },
         },
         {
-            "name": "rf_regularized_log",
-            "target_transform": "log1p",
-            "params": {
-                "n_estimators": 700,
-                "max_depth": 20,
-                "min_samples_split": 4,
-                "min_samples_leaf": 2,
-                "max_features": "sqrt",
-            },
-        },
-        {
-            "name": "rf_balanced_sqrt",
-            "target_transform": "sqrt",
-            "params": {
-                "n_estimators": 800,
-                "max_depth": 24,
-                "min_samples_split": 3,
-                "min_samples_leaf": 1,
-                "max_features": "sqrt",
-            },
-        },
-        {
-            "name": "rf_regularized_sqrt",
+            "name": "rf_high_accuracy_sqrt_700",
             "target_transform": "sqrt",
             "params": {
                 "n_estimators": 700,
-                "max_depth": 18,
-                "min_samples_split": 5,
-                "min_samples_leaf": 2,
-                "max_features": 0.70,
+                "max_depth": 30,
+                "min_samples_split": 2,
+                "min_samples_leaf": 1,
+                "max_features": 0.90,
+                "max_leaf_nodes": 3600,
+                "max_samples": None,
             },
         },
     ]
@@ -1053,26 +1253,73 @@ def make_stratification_bins(y: np.ndarray) -> Any:
 
     try:
         bins = pd.qcut(np.log1p(y), q=5, duplicates="drop")
+        bins_series = pd.Series(bins)
 
-        if bins.isna().any():
+        if bins_series.isna().any():
             return None
 
-        counts = pd.Series(bins).value_counts()
+        counts = bins_series.value_counts()
 
         if (counts < 2).any():
             return None
 
-        return bins
+        return bins_series
     except Exception:
         return None
+
+
+def apply_prediction_blend(
+    y_model: np.ndarray,
+    features_df: pd.DataFrame,
+    blend_config: dict[str, Any],
+) -> np.ndarray:
+    """
+    Blends model prediction with local historical priors.
+
+    Comentario:
+    Esto mejora precisión en datasets epidemiológicos porque el histórico local
+    por municipio, enfermedad y mes suele ser muy predictivo.
+    """
+
+    y_model = np.asarray(y_model, dtype=float)
+    blended = np.zeros_like(y_model, dtype=float)
+
+    weights = blend_config.get("weights", {})
+    total_weight = 0.0
+
+    for component, weight in weights.items():
+        weight = float(weight)
+
+        if component == "model":
+            values = y_model
+        elif component in features_df.columns:
+            values = features_df[component].astype(float).to_numpy()
+        else:
+            values = np.zeros_like(y_model, dtype=float)
+
+        blended += values * weight
+        total_weight += weight
+
+    if total_weight <= 0:
+        return np.clip(y_model, 0, None)
+
+    blended = blended / total_weight
+
+    return np.clip(blended, 0, None)
 
 
 def select_best_candidate(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
     priors: dict[str, Any],
-) -> tuple[Pipeline, dict[str, Any], dict[str, float]]:
-    """Trains several Random Forest candidates and returns the best one."""
+) -> tuple[Pipeline, dict[str, Any], dict[str, Any], dict[str, float]]:
+    """
+    Trains several stronger Random Forest candidates and returns the best one.
+
+    Comentario:
+    Además de elegir el mejor Random Forest, también elige la mejor mezcla entre
+    predicción del modelo y priors históricos locales.
+    """
 
     train_features_df = apply_prior_features(train_df, priors)
     test_features_df = apply_prior_features(test_df, priors)
@@ -1087,6 +1334,7 @@ def select_best_candidate(
 
     best_model = None
     best_config = None
+    best_blend_config = None
     best_metrics = None
     best_score = float("inf")
 
@@ -1104,39 +1352,53 @@ def select_best_candidate(
         )
 
         y_pred_transformed = pipeline.predict(X_test)
-        y_pred_raw = inverse_transform_target(y_pred_transformed, method)
-        y_pred_raw = np.clip(y_pred_raw, 0, None)
+        y_pred_model_raw = inverse_transform_target(y_pred_transformed, method)
+        y_pred_model_raw = np.clip(y_pred_model_raw, 0, None)
 
-        metrics = evaluate_predictions(y_test_raw, y_pred_raw)
+        for blend_config in BLEND_CONFIGS:
+            y_pred_raw = apply_prediction_blend(
+                y_model=y_pred_model_raw,
+                features_df=test_features_df,
+                blend_config=blend_config,
+            )
 
-        selection_score = (
-            metrics["wape_pct"]
-            + metrics["smape_pct"] * 0.25
-            + metrics["rmse"] * 0.03
-            - metrics["r2"] * 5
-        )
+            metrics = evaluate_predictions(y_test_raw, y_pred_raw)
 
-        log.info(
-            "Candidate %s | score=%.4f | metrics=%s",
-            config["name"],
-            selection_score,
-            json.dumps(metrics, ensure_ascii=False),
-        )
+            selection_score = (
+                metrics["wape_pct"]
+                + metrics["smape_pct"] * 0.20
+                + metrics["rmse"] * 0.02
+                - metrics["r2"] * 8
+            )
 
-        if selection_score < best_score:
-            best_score = selection_score
-            best_model = pipeline
-            best_config = config
-            best_metrics = metrics
+            log.info(
+                "Candidate %s + %s | score=%.4f | metrics=%s",
+                config["name"],
+                blend_config["name"],
+                selection_score,
+                json.dumps(metrics, ensure_ascii=False),
+            )
 
-    if best_model is None or best_config is None or best_metrics is None:
+            if selection_score < best_score:
+                best_score = selection_score
+                best_model = pipeline
+                best_config = config
+                best_blend_config = blend_config
+                best_metrics = metrics
+
+    if (
+        best_model is None
+        or best_config is None
+        or best_blend_config is None
+        or best_metrics is None
+    ):
         raise RuntimeError("No model candidate could be trained.")
 
-    return best_model, best_config, best_metrics
+    return best_model, best_config, best_blend_config, best_metrics
 
 
 def train_single_model(dataset_df: pd.DataFrame, model_name: str) -> dict[str, Any]:
-    """Trains one optimized model over a given dataset."""
+    """Trains one optimized high-accuracy model over a given dataset."""
 
     if len(dataset_df) < 10:
         raise ValueError(f"Not enough rows to train model {model_name}")
@@ -1151,19 +1413,24 @@ def train_single_model(dataset_df: pd.DataFrame, model_name: str) -> dict[str, A
     train_df, test_df = train_test_split(
         dataset_df,
         test_size=test_size,
-        random_state=42,
+        random_state=RANDOM_STATE,
         stratify=stratify_bins,
     )
 
     priors_train = fit_prior_maps(train_df)
 
-    _, best_config, validation_metrics = select_best_candidate(
+    _, best_config, best_blend_config, validation_metrics = select_best_candidate(
         train_df=train_df,
         test_df=test_df,
         priors=priors_train,
     )
 
-    log.info("Best config for %s: %s", model_name, best_config["name"])
+    log.info(
+        "Best config for %s: %s + %s",
+        model_name,
+        best_config["name"],
+        best_blend_config["name"],
+    )
 
     final_priors = fit_prior_maps(dataset_df)
     final_features_df = apply_prior_features(dataset_df, final_priors)
@@ -1181,11 +1448,17 @@ def train_single_model(dataset_df: pd.DataFrame, model_name: str) -> dict[str, A
     )
 
     train_pred_transformed = final_model.predict(X_full)
-    train_pred_raw = inverse_transform_target(
+    train_pred_model_raw = inverse_transform_target(
         train_pred_transformed,
         best_config["target_transform"],
     )
-    train_pred_raw = np.clip(train_pred_raw, 0, None)
+    train_pred_model_raw = np.clip(train_pred_model_raw, 0, None)
+
+    train_pred_raw = apply_prediction_blend(
+        y_model=train_pred_model_raw,
+        features_df=final_features_df,
+        blend_config=best_blend_config,
+    )
 
     train_metrics = evaluate_predictions(y_full_raw, train_pred_raw)
 
@@ -1194,6 +1467,7 @@ def train_single_model(dataset_df: pd.DataFrame, model_name: str) -> dict[str, A
         "model_name": model_name,
         "model_type": "RandomForestRegressor",
         "best_config": best_config,
+        "blend_config": best_blend_config,
         "target_transform": best_config["target_transform"],
         "validation_metrics": validation_metrics,
         "train_metrics": train_metrics,
@@ -1202,14 +1476,23 @@ def train_single_model(dataset_df: pd.DataFrame, model_name: str) -> dict[str, A
     }
 
 
+def get_model_size_mb() -> float:
+    """Returns model.pkl size in MB."""
+
+    if not MODEL_PATH.exists():
+        return 0.0
+
+    return round(MODEL_PATH.stat().st_size / (1024 * 1024), 2)
+
+
 # -----------------------------------------------------------------------------
 # Training
 # -----------------------------------------------------------------------------
 
 def train_random_forest_model() -> dict[str, Any]:
-    """Trains optimized global and disease-specific Random Forest models."""
+    """Trains optimized high-accuracy Random Forest models."""
 
-    log.info("Starting optimized Random Forest training")
+    log.info("Starting high-accuracy Random Forest training")
 
     clean_df = load_clean_dataset()
     training_df = build_training_dataset(clean_df)
@@ -1234,33 +1517,37 @@ def train_random_forest_model() -> dict[str, Any]:
 
     disease_payloads: dict[str, Any] = {}
 
-    for disease in sorted(training_df["disease"].dropna().unique()):
-        disease_df = training_df[training_df["disease"] == disease].copy()
+    if TRAIN_DISEASE_SPECIFIC_MODELS:
+        for disease in sorted(training_df["disease"].dropna().unique()):
+            disease_df = training_df[training_df["disease"] == disease].copy()
 
-        if len(disease_df) < MIN_ROWS_FOR_DISEASE_MODEL:
-            log.warning(
-                "Skipping disease-specific model for %s. Only %s rows available.",
+            if len(disease_df) < MIN_ROWS_FOR_DISEASE_MODEL:
+                log.warning(
+                    "Skipping disease-specific model for %s. Only %s rows available.",
+                    disease,
+                    len(disease_df),
+                )
+                continue
+
+            log.info(
+                "Training disease-specific model for %s with %s rows",
                 disease,
-                len(disease_df),
+                f"{len(disease_df):,}",
             )
-            continue
 
-        log.info(
-            "Training disease-specific model for %s with %s rows",
-            disease,
-            f"{len(disease_df):,}",
-        )
-
-        disease_payloads[disease] = train_single_model(
-            disease_df,
-            model_name=disease,
-        )
+            disease_payloads[disease] = train_single_model(
+                disease_df,
+                model_name=disease,
+            )
+    else:
+        log.info("Disease-specific models disabled.")
 
     metrics = {
         "GLOBAL": {
             "validation_metrics": global_payload["validation_metrics"],
             "train_metrics": global_payload["train_metrics"],
             "best_config": global_payload["best_config"]["name"],
+            "blend_config": global_payload["blend_config"]["name"],
             "training_rows": global_payload["training_rows"],
         },
         "BY_DISEASE": {
@@ -1268,14 +1555,19 @@ def train_random_forest_model() -> dict[str, Any]:
                 "validation_metrics": payload["validation_metrics"],
                 "train_metrics": payload["train_metrics"],
                 "best_config": payload["best_config"]["name"],
+                "blend_config": payload["blend_config"]["name"],
                 "training_rows": payload["training_rows"],
             }
             for disease, payload in disease_payloads.items()
         },
+        "MODEL_SIZE": {
+            "compression": str(MODEL_COMPRESSION),
+            "disease_specific_models_enabled": TRAIN_DISEASE_SPECIFIC_MODELS,
+        },
     }
 
     bundle = {
-        "bundle_type": "optimized_random_forest_outbreak_bundle",
+        "bundle_type": "high_accuracy_random_forest_outbreak_bundle",
         "global_model": global_payload,
         "disease_models": disease_payloads,
         "target": TARGET_COL,
@@ -1286,9 +1578,17 @@ def train_random_forest_model() -> dict[str, Any]:
         "climate_profiles": DEPARTMENT_CLIMATE_PROFILE,
         "default_climate_profile": DEFAULT_CLIMATE_PROFILE,
         "training_rows": int(len(training_df)),
+        "prediction_year": PREDICTION_YEAR,
     }
 
-    joblib.dump(bundle, MODEL_PATH)
+    joblib.dump(
+        bundle,
+        MODEL_PATH,
+        compress=MODEL_COMPRESSION,
+    )
+
+    model_size_mb = get_model_size_mb()
+    metrics["MODEL_SIZE"]["model_pkl_mb"] = model_size_mb
 
     METRICS_PATH.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2),
@@ -1296,6 +1596,7 @@ def train_random_forest_model() -> dict[str, Any]:
     )
 
     log.info("Model bundle saved successfully: %s", MODEL_PATH)
+    log.info("Model size: %.2f MB", model_size_mb)
     log.info("Metrics saved successfully: %s", METRICS_PATH)
     log.info("Final metrics:\n%s", json.dumps(metrics, ensure_ascii=False, indent=2))
 
@@ -1307,14 +1608,21 @@ def train_random_forest_model() -> dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 def load_model_bundle() -> dict[str, Any]:
-    """Loads model.pkl."""
+    """Loads model.pkl with in-memory cache."""
+
+    global _MODEL_BUNDLE_CACHE
+
+    if _MODEL_BUNDLE_CACHE is not None:
+        return _MODEL_BUNDLE_CACHE
 
     if not MODEL_PATH.exists():
         raise FileNotFoundError(
             f"Model not found: {MODEL_PATH}. Train it first with: python -m src.ml.model --train"
         )
 
-    return joblib.load(MODEL_PATH)
+    _MODEL_BUNDLE_CACHE = joblib.load(MODEL_PATH)
+
+    return _MODEL_BUNDLE_CACHE
 
 
 def select_payload_for_disease(bundle: dict[str, Any], disease: str) -> dict[str, Any]:
@@ -1394,15 +1702,48 @@ def build_prediction_row(
         previous_2,
     )
 
+    previous_4 = get_previous_month_value(
+        priors,
+        disease_norm,
+        department_norm,
+        municipality_norm,
+        month - 4,
+        previous_3,
+    )
+
+    previous_5 = get_previous_month_value(
+        priors,
+        disease_norm,
+        department_norm,
+        municipality_norm,
+        month - 5,
+        previous_4,
+    )
+
+    previous_6 = get_previous_month_value(
+        priors,
+        disease_norm,
+        department_norm,
+        municipality_norm,
+        month - 6,
+        previous_5,
+    )
+
+    previous_values_3 = [previous_1, previous_2, previous_3]
+    previous_values_6 = [previous_1, previous_2, previous_3, previous_4, previous_5, previous_6]
+
     row = {
         "disease": disease_norm,
-        "year": 2024,
+        "year": PREDICTION_YEAR,
         "department": department_norm,
         "municipality": municipality_norm,
         "month": int(month),
+        "quarter": int(((month - 1) // 3) + 1),
+        "semester": 1 if month <= 6 else 2,
         "month_sin": float(np.sin(2 * np.pi * month / 12)),
         "month_cos": float(np.cos(2 * np.pi * month / 12)),
         "is_rainy_season": int(is_rainy),
+        "is_high_transmission_month": int(month in [3, 4, 5, 6, 10, 11]),
         "thermal_floor": profile["thermal_floor"],
         "avg_temp_c": float(profile["avg_temp_c"]),
         "precipitation_mm": float(profile["precipitation_mm"]),
@@ -1421,7 +1762,12 @@ def build_prediction_row(
         ),
         "cases_previous_month": float(previous_1),
         "cases_previous_2_month_mean": float(np.mean([previous_1, previous_2])),
-        "cases_previous_3_month_mean": float(np.mean([previous_1, previous_2, previous_3])),
+        "cases_previous_3_month_mean": float(np.mean(previous_values_3)),
+        "cases_previous_6_month_mean": float(np.mean(previous_values_6)),
+        "cases_previous_3_month_sum": float(np.sum(previous_values_3)),
+        "cases_previous_6_month_sum": float(np.sum(previous_values_6)),
+        "cases_trend_1m": float(previous_1 - previous_2),
+        "cases_trend_3m": float(np.mean(previous_values_3) - np.mean(previous_values_6)),
         TARGET_COL: 0,
     }
 
@@ -1454,9 +1800,26 @@ def predict_outbreaks(
     )
 
     prediction_transformed = model.predict(input_df[ALL_FEATURES])[0]
-    prediction_cases = inverse_transform_target(
+
+    prediction_model_raw = inverse_transform_target(
         np.array([prediction_transformed]),
         target_transform,
+    )[0]
+
+    prediction_model_raw = max(0.0, float(prediction_model_raw))
+
+    blend_config = payload.get(
+        "blend_config",
+        {
+            "name": "pure_model",
+            "weights": {"model": 1.0},
+        },
+    )
+
+    prediction_cases = apply_prediction_blend(
+        y_model=np.array([prediction_model_raw]),
+        features_df=input_df,
+        blend_config=blend_config,
     )[0]
 
     prediction_cases = max(0.0, float(prediction_cases))
@@ -1473,6 +1836,7 @@ def predict_outbreaks(
         "estimated_outbreak_proxy": estimated_cases,
         "outbreak_level": outbreak_level,
         "model_used": payload["model_name"],
+        "blend_used": blend_config.get("name", "pure_model"),
         "thermal_floor": input_df.loc[0, "thermal_floor"],
         "avg_temp_c": round(float(input_df.loc[0, "avg_temp_c"]), 2),
         "precipitation_mm": round(float(input_df.loc[0, "precipitation_mm"]), 2),
@@ -1484,6 +1848,11 @@ def predict_outbreaks(
         "cases_previous_month": round(float(input_df.loc[0, "cases_previous_month"]), 2),
         "cases_previous_2_month_mean": round(float(input_df.loc[0, "cases_previous_2_month_mean"]), 2),
         "cases_previous_3_month_mean": round(float(input_df.loc[0, "cases_previous_3_month_mean"]), 2),
+        "cases_previous_6_month_mean": round(float(input_df.loc[0, "cases_previous_6_month_mean"]), 2),
+        "cases_previous_3_month_sum": round(float(input_df.loc[0, "cases_previous_3_month_sum"]), 2),
+        "cases_previous_6_month_sum": round(float(input_df.loc[0, "cases_previous_6_month_sum"]), 2),
+        "cases_trend_1m": round(float(input_df.loc[0, "cases_trend_1m"]), 2),
+        "cases_trend_3m": round(float(input_df.loc[0, "cases_trend_3m"]), 2),
         "model_validation_metrics": payload.get("validation_metrics", {}),
         "model_train_metrics": payload.get("train_metrics", {}),
     }
@@ -1530,12 +1899,13 @@ def predict_dataframe(input_df: pd.DataFrame) -> pd.DataFrame:
 def run_training() -> None:
     """Runs model training."""
 
-    log.info("=== Optimized Random Forest training pipeline started ===")
+    log.info("=== High-accuracy Random Forest training pipeline started ===")
 
     bundle = train_random_forest_model()
 
     log.info("=== Training completed ===")
     log.info("Training rows: %s", bundle["training_rows"])
+    log.info("Model size: %.2f MB", get_model_size_mb())
     log.info("Metrics: %s", json.dumps(bundle["metrics"], ensure_ascii=False))
 
 
@@ -1562,13 +1932,13 @@ def main() -> None:
     """Command line entrypoint."""
 
     parser = argparse.ArgumentParser(
-        description="Optimized Random Forest model for mosquito-borne disease outbreak prediction.",
+        description="High-accuracy Random Forest model for mosquito-borne disease outbreak prediction.",
     )
 
     parser.add_argument(
         "--train",
         action="store_true",
-        help="Train optimized Random Forest model and generate model.pkl.",
+        help="Train high-accuracy Random Forest model and generate compressed model.pkl.",
     )
 
     parser.add_argument(

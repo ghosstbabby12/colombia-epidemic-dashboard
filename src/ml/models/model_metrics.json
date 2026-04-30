@@ -1,84 +1,93 @@
 {
   "GLOBAL": {
     "validation_metrics": {
-      "mae": 11.9598,
-      "rmse": 84.6494,
-      "r2": 0.5885,
-      "mape_non_zero_pct": 85.4836,
-      "wape_pct": 49.9242,
-      "smape_pct": 106.5889
+      "mae": 13.0557,
+      "rmse": 61.3561,
+      "r2": 0.7838,
+      "mape_non_zero_pct": 131.9096,
+      "wape_pct": 54.4992,
+      "smape_pct": 70.2235
     },
     "train_metrics": {
-      "mae": 4.5603,
-      "rmse": 21.4122,
-      "r2": 0.9683,
-      "mape_non_zero_pct": 49.4483,
-      "wape_pct": 19.9603,
-      "smape_pct": 94.5963
+      "mae": 0.1196,
+      "rmse": 3.692,
+      "r2": 0.9991,
+      "mape_non_zero_pct": 0.0234,
+      "wape_pct": 0.5234,
+      "smape_pct": 0.1093
     },
-    "best_config": "rf_balanced_sqrt",
+    "best_config": "rf_high_accuracy_sqrt_700",
+    "blend_config": "pure_model",
     "training_rows": 16980
   },
   "BY_DISEASE": {
     "Chikungunya": {
       "validation_metrics": {
-        "mae": 0.1349,
-        "rmse": 0.3963,
-        "r2": -0.1043,
-        "mape_non_zero_pct": 89.1596,
-        "wape_pct": 101.2026,
-        "smape_pct": 64.0243
+        "mae": 0.1623,
+        "rmse": 0.39,
+        "r2": -0.0694,
+        "mape_non_zero_pct": 86.1998,
+        "wape_pct": 121.6987,
+        "smape_pct": 57.6246
       },
       "train_metrics": {
-        "mae": 0.0042,
-        "rmse": 0.0532,
-        "r2": 0.985,
-        "mape_non_zero_pct": 1.1909,
-        "wape_pct": 2.9101,
-        "smape_pct": 11.9858
+        "mae": 0.0037,
+        "rmse": 0.0528,
+        "r2": 0.9852,
+        "mape_non_zero_pct": 0.9633,
+        "wape_pct": 2.5638,
+        "smape_pct": 0.1292
       },
-      "best_config": "rf_stable_log",
+      "best_config": "rf_accuracy_sqrt_350",
+      "blend_config": "pure_model",
       "training_rows": 372
     },
     "Dengue": {
       "validation_metrics": {
-        "mae": 10.5775,
-        "rmse": 42.3055,
-        "r2": 0.844,
-        "mape_non_zero_pct": 89.7077,
-        "wape_pct": 42.6467,
-        "smape_pct": 96.0299
+        "mae": 14.4481,
+        "rmse": 54.9369,
+        "r2": 0.737,
+        "mape_non_zero_pct": 127.6225,
+        "wape_pct": 58.2523,
+        "smape_pct": 100.2155
       },
       "train_metrics": {
-        "mae": 4.4497,
-        "rmse": 21.0586,
-        "r2": 0.9767,
-        "mape_non_zero_pct": 44.5381,
-        "wape_pct": 17.004,
-        "smape_pct": 77.9828
+        "mae": 3.2948,
+        "rmse": 16.3747,
+        "r2": 0.9859,
+        "mape_non_zero_pct": 26.8322,
+        "wape_pct": 12.5906,
+        "smape_pct": 68.7225
       },
-      "best_config": "rf_balanced_sqrt",
+      "best_config": "rf_accuracy_sqrt_500",
+      "blend_config": "model_plus_local_history",
       "training_rows": 11832
     },
     "Malaria": {
       "validation_metrics": {
-        "mae": 5.8782,
-        "rmse": 20.1887,
-        "r2": 0.8607,
-        "mape_non_zero_pct": 72.5866,
-        "wape_pct": 38.9246,
-        "smape_pct": 53.6708
+        "mae": 6.0157,
+        "rmse": 20.6283,
+        "r2": 0.8546,
+        "mape_non_zero_pct": 70.2944,
+        "wape_pct": 39.8353,
+        "smape_pct": 120.9407
       },
       "train_metrics": {
-        "mae": 0.2285,
-        "rmse": 3.0323,
-        "r2": 0.9978,
-        "mape_non_zero_pct": 0.3728,
-        "wape_pct": 1.3946,
-        "smape_pct": 7.2556
+        "mae": 0.0916,
+        "rmse": 1.4282,
+        "r2": 0.9995,
+        "mape_non_zero_pct": 0.048,
+        "wape_pct": 0.559,
+        "smape_pct": 0.1487
       },
-      "best_config": "rf_regularized_sqrt",
+      "best_config": "rf_high_accuracy_sqrt_700",
+      "blend_config": "pure_model",
       "training_rows": 4776
     }
+  },
+  "MODEL_SIZE": {
+    "compression": "('xz', 6)",
+    "disease_specific_models_enabled": true,
+    "model_pkl_mb": 21.48
   }
 }

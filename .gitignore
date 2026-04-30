@@ -38,8 +38,7 @@ data/processed/*.parquet
 # =========================
 # Modelos entrenados ML
 # =========================
-src/ml/models/*
-!src/ml/models/.gitkeep
+
 
 *.pkl
 *.joblib
@@ -50,8 +49,7 @@ src/ml/models/*
 *.pt
 *.pth
 
-# Permite conservar la carpeta vacía si necesitas que exista en el repo
-!src/ml/models/.gitkeep
+
 
 # =========================
 # macOS
